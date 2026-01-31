@@ -1,0 +1,94 @@
+@startuml CMsgApp
+
+
+actor           "Single Peer" as cli
+participant     Server as serv
+actor           "All Peers" as all
+
+note right of serv
+    Hash collections reasoning: 
+    - File Descriptors are integers and unique
+    - Avoids O(n) lookup for already connected peers
+    - Doable since there is upper bound for num. of connected peers
+end note
+
+note over cli: Start with fd_set[2] with form {stdin, sockfd}
+note over serv: Start with fd_set[256] and fd_set[hash(servsockfd)] = servsockfd
+
+serv -> serv: Listen with 10 socket backlog
+
+loop While server running
+
+    Group On server select() unblock [new connection]
+        cli -> cli: Enters username
+        cli -> serv: First connection
+        activate serv
+        cli -> cli: Await response
+        activate cli
+
+        serv -> serv: Accepts connection
+
+        alt Connection list full
+            serv -> cli: Reject connection (data prefix: 'r')
+            serv -> serv: Close peer socket
+            destroy cli
+        else Connection list not full
+            serv -> serv: Adds socket to readfds Hashlist
+            serv -> cli: Confirm connection (data prefix: 'a')
+            deactivate serv
+            activate cli
+
+            cli -> serv: Send username (data prefix: 'u')
+            activate serv
+            serv -> serv: Reads as username with 'u'
+            serv -> serv: Stores in peer username Hashmap
+            serv -> serv: Adds connection msg to history
+            note right: History should be two-way linked list ?\neasy for deleting tail after history limit reached
+            serv -> cli: Sends recent msg history to peer (data prefix: 'm')
+            cli -> cli: Displays history and\nenters msg sending mode
+            deactivate cli
+
+            serv -> all: Broadcast the new user connection (data prefix: 'm')
+            note right: "{username} connected"
+            deactivate serv
+        end
+
+    else New Message
+
+            cli -> cli: Enters message
+            note left: Sender's message is displayed by\nthe resulting server broadcast
+            cli -> serv: Message sent (data prefix: 'm')
+            activate serv
+
+            serv -> serv: Reads as message with 'm'
+            serv -> serv: Adds msg to history
+
+            serv -> all: Broadcast the message (data prefix: 'm')
+            note right: "{username}: {message}"\nPrefix by time "[{HH:MM}]" ?
+            deactivate serv
+
+    else Disconnection
+
+        cli -> serv: Disconnection
+        activate serv
+        serv -> serv: Reads 0 from peer's sockfd
+        serv -> serv: Remove socket from readfds
+        serv -> serv: Close peer socket
+
+        serv -> all: Broadcast the user disconnection (data prefix: 'm')
+        note right: "{username} diconnected"
+        deactivate serv
+
+    end
+
+
+
+end
+
+
+
+
+
+
+
+@enduml
